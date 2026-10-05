@@ -5,7 +5,9 @@
 # -----------------------------------------------------------------------------
 """Set based operations for IP addresses and subnets."""
 
+import bisect as _bisect
 import itertools as _itertools
+import operator as _operator
 import sys as _sys
 
 from netaddr.ip import IPNetwork, IPAddress, IPRange, cidr_merge, cidr_exclude, iprange_to_cidrs
@@ -76,6 +78,340 @@ def _iter_merged_ranges(sorted_ranges):
         current_stop = next_stop
         current_version = next_version
     yield (IPAddress(current_start, current_version), IPAddress(current_stop, current_version))
+
+
+class IPSetIndexView(object):
+    """
+    An immutable, ordinal view of the addresses in an :class:`IPSet`.
+
+    Addresses are ordered with all IPv4 addresses first, followed by all IPv6
+    addresses. Addresses of each version are ordered by their numeric value.
+    """
+
+    __slots__ = ('_blocks', '_starts', '_ends', '_offsets', '_start', '_step', '_size')
+
+    def __init__(self, ipset=None):
+        if ipset is None:
+            blocks = ()
+        elif isinstance(ipset, IPSet):
+            blocks = tuple(
+                (cidr._module.version, cidr.first, cidr.last)
+                for cidr in ipset.iter_cidrs()
+            )
+        else:
+            raise TypeError('IPSet expected, not %s' % type(ipset).__name__)
+        offsets = [0]
+        starts = []
+        ends = []
+
+        for version, first, last in blocks:
+            starts.append((version - 4, first))
+            ends.append((version - 4, last))
+            offsets.append(offsets[-1] + last - first + 1)
+
+        self._blocks = blocks
+        self._starts = tuple(starts)
+        self._ends = tuple(ends)
+        self._offsets = tuple(offsets)
+        self._start = 0
+        self._step = 1
+        self._size = self._offsets[-1]
+
+    @classmethod
+    def _from_ipset(cls, ipset):
+        return cls(ipset)
+
+    def _with_affine(self, start, step, size):
+        view = self.__class__()
+        view._blocks = self._blocks
+        view._starts = self._starts
+        view._ends = self._ends
+        view._offsets = self._offsets
+        if size:
+            view._start = self._start + start * self._step
+        else:
+            view._start = 0
+        view._step = self._step * step
+        view._size = size
+        return view
+
+    @property
+    def size(self):
+        """The number of addresses represented by this view."""
+        return self._size
+
+    def __bool__(self):
+        return self._size > 0
+
+    def __len__(self):
+        if self._size > _sys.maxsize:
+            raise IndexError(
+                'range contains more than %d (sys.maxsize) IP addresses!'
+                'Use the .size property instead.' % _sys.maxsize
+            )
+        return self._size
+
+    def _address_key(self, address, flags=0):
+        if isinstance(address, IPNetwork):
+            address = address.ip
+        if not isinstance(address, IPAddress):
+            address = IPAddress(address, flags=flags)
+        return address._module.version - 4, address._value
+
+    def _block_index_for_key(self, key):
+        index = _bisect.bisect_right(self._starts, key) - 1
+        if index >= 0 and key <= self._ends[index]:
+            return index
+        return None
+
+    def _root_rank_left(self, key):
+        index = _bisect.bisect_left(self._ends, key)
+        if index == len(self._blocks):
+            return self._offsets[-1]
+
+        start_key = self._starts[index]
+        if key < start_key:
+            return self._offsets[index]
+
+        first = start_key[1]
+        return self._offsets[index] + key[1] - first
+
+    def _root_rank_right(self, key):
+        index = _bisect.bisect_left(self._ends, key)
+        if index == len(self._blocks):
+            return self._offsets[-1]
+
+        start_key = self._starts[index]
+        if key < start_key:
+            return self._offsets[index]
+
+        first = start_key[1]
+        return self._offsets[index] + key[1] - first + 1
+
+    def _address_for_ordinal(self, ordinal):
+        block_index = _bisect.bisect_right(self._offsets, ordinal) - 1
+        version, first = self._blocks[block_index][:2]
+        value = first + (ordinal - self._offsets[block_index])
+        return IPAddress(value, version)
+
+    def _selected_position(self, ordinal):
+        if self._step > 0:
+            if ordinal < self._start:
+                return None
+            distance = ordinal - self._start
+            position = distance // self._step
+            in_view = distance % self._step == 0 and position < self._size
+        else:
+            if ordinal > self._start:
+                return None
+            distance = self._start - ordinal
+            step = -self._step
+            position = distance // step
+            in_view = distance % step == 0 and position < self._size
+
+        if in_view:
+            return position
+        return None
+
+    def _count_before(self, ordinal):
+        if self._step > 0:
+            if ordinal <= self._start:
+                return 0
+            distance = ordinal - self._start
+            return min(self._size, (distance + self._step - 1) // self._step)
+
+        if ordinal >= self._start:
+            return 0
+        distance = self._start - ordinal
+        step = -self._step
+        return min(self._size, (distance + step - 1) // step)
+
+    def _count_through(self, ordinal):
+        if self._step > 0:
+            if ordinal < self._start:
+                return 0
+            distance = ordinal - self._start
+            return min(self._size, distance // self._step + 1)
+
+        if ordinal > self._start:
+            return 0
+        distance = self._start - ordinal
+        return min(self._size, distance // -self._step + 1)
+
+    def _slice_bounds(self, index):
+        step = 1 if index.step is None else _operator.index(index.step)
+        if step == 0:
+            raise ValueError('slice step cannot be zero')
+
+        size = self._size
+
+        if index.start is None:
+            start = size - 1 if step < 0 else 0
+        else:
+            start = _operator.index(index.start)
+            if step > 0:
+                if start < 0:
+                    start += size
+                start = min(size, max(0, start))
+            else:
+                if start < 0:
+                    start += size
+                start = min(size - 1, start)
+                if start < -1:
+                    start = -1
+
+        if index.stop is None:
+            stop = -1 if step < 0 else size
+        else:
+            stop = _operator.index(index.stop)
+            if stop < 0:
+                stop += size
+            if step > 0:
+                stop = min(size, max(0, stop))
+            else:
+                stop = min(size - 1, stop)
+                if stop < -1:
+                    stop = -1
+
+        if step > 0:
+            result_size = max(0, (stop - start + step - 1) // step)
+        else:
+            result_size = max(0, (start - stop - step - 1) // (-step))
+
+        return start, step, result_size
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            start, step, size = self._slice_bounds(index)
+            return self._with_affine(start, step, size)
+
+        index = _operator.index(index)
+        if index < 0:
+            index += self._size
+        if not 0 <= index < self._size:
+            raise IndexError('index out of range for IP set index view!')
+
+        position = self._start + index * self._step
+        return self._address_for_ordinal(position)
+
+    def __iter__(self):
+        if self._size == 0:
+            return
+
+        if self._step in (1, -1):
+            block_index = _bisect.bisect_right(self._offsets, self._start) - 1
+            emitted = 0
+
+            if self._step == 1:
+                while block_index < len(self._blocks) and emitted < self._size:
+                    version, first, last = self._blocks[block_index]
+                    if emitted == 0:
+                        value = first + self._start - self._offsets[block_index]
+                    else:
+                        value = first
+                    while value <= last and emitted < self._size:
+                        yield IPAddress(value, version)
+                        value += 1
+                        emitted += 1
+                    block_index += 1
+            else:
+                while block_index >= 0 and emitted < self._size:
+                    version, first, last = self._blocks[block_index]
+                    if emitted == 0:
+                        value = first + self._start - self._offsets[block_index]
+                    else:
+                        value = last
+                    while value >= first and emitted < self._size:
+                        yield IPAddress(value, version)
+                        value -= 1
+                        emitted += 1
+                    block_index -= 1
+        else:
+            for position in range(self._size):
+                yield self._address_for_ordinal(self._start + position * self._step)
+
+    def __reversed__(self):
+        if self._size == 0:
+            return iter(())
+        return iter(self[::-1])
+
+    def __contains__(self, address):
+        try:
+            key = self._address_key(address)
+        except (TypeError, ValueError):
+            return False
+        block_index = self._block_index_for_key(key)
+        if block_index is None:
+            return False
+        ordinal = self._root_ordinal_for_key(key, block_index)
+        return self._selected_position(ordinal) is not None
+
+    def _root_ordinal_for_key(self, key, block_index):
+        return self._offsets[block_index] + key[1] - self._starts[block_index][1]
+
+    def rank(self, address, flags=0):
+        """
+        Return the rank of an address.
+
+        For a member this is its zero-based position. For a non-member it is
+        its insertion position in the view's ordering.
+        """
+        key = self._address_key(address, flags)
+        if self._step > 0:
+            ordinal = self._root_rank_left(key)
+            return self._count_before(ordinal)
+        else:
+            ordinal = self._root_rank_right(key)
+            return self._count_through(ordinal)
+
+    def index(self, address, flags=0):
+        """Return the zero-based position of a member address."""
+        key = self._address_key(address, flags)
+        block_index = self._block_index_for_key(key)
+        if block_index is None:
+            raise ValueError('%r is not in the IP set index view' % address)
+
+        ordinal = self._root_ordinal_for_key(key, block_index)
+        position = self._selected_position(ordinal)
+        if position is None:
+            raise ValueError('%r is not in the IP set index view' % address)
+        return position
+
+    def bisect_left(self, address, flags=0):
+        """Return the insertion point to the left of an equal member."""
+        return self.rank(address, flags)
+
+    def bisect_right(self, address, flags=0):
+        """Return the insertion point to the right of an equal member."""
+        key = self._address_key(address, flags)
+        if self._step > 0:
+            ordinal = self._root_rank_right(key) - 1
+            return self._count_through(ordinal)
+        else:
+            ordinal = self._root_rank_left(key)
+            return self._count_through(ordinal)
+
+    def __eq__(self, other):
+        if not isinstance(other, IPSetIndexView):
+            return NotImplemented
+        return (
+            self._blocks == other._blocks
+            and self._start == other._start
+            and self._step == other._step
+            and self._size == other._size
+        )
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def __hash__(self):
+        return hash((self._blocks, self._start, self._step, self._size))
+
+    def __repr__(self):
+        return 'IPSetIndexView(size=%r)' % self._size
 
 
 class IPSet(object):
@@ -255,6 +591,15 @@ class IPSet(object):
         :return: an iterator over individual IP subnets within this IP set.
         """
         return sorted(self._cidrs)
+
+    def index_view(self):
+        """
+        :return: an immutable ordinal view of the addresses in this IP set.
+
+        The view takes a snapshot of the set's addresses. Subsequent changes
+        to this IP set do not affect existing views.
+        """
+        return IPSetIndexView._from_ipset(self)
 
     def add(self, addr, flags=0):
         """

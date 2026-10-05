@@ -1,10 +1,11 @@
+import itertools
 import pickle
 import sys
 import weakref
 
 import pytest
 
-from netaddr import IPAddress, IPNetwork, IPRange, IPSet, cidr_exclude
+from netaddr import IPAddress, IPNetwork, IPRange, IPSet, IPSetIndexView, cidr_exclude
 
 
 def test_ipset_basic_api():
@@ -748,3 +749,162 @@ def test_ipset_converts_to_cidr_networks_v6():
 
 def test_ipset_is_weak_referencable():
     weakref.ref(IPSet())
+
+
+def test_ipset_index_view_empty():
+    ipset = IPSet()
+    view = ipset.index_view()
+
+    assert isinstance(view, IPSetIndexView)
+    assert view == IPSetIndexView(ipset)
+    assert view.size == 0
+    assert not view
+    assert len(view) == 0
+    assert list(view) == []
+    assert view.rank('192.0.2.0') == 0
+    assert view.rank('::1') == 0
+    assert view.bisect_right('::1') == 0
+    assert '192.0.2.0' not in view
+    assert list(view[::2]) == []
+    assert list(view[::-1]) == []
+
+    with pytest.raises(IndexError):
+        view[0]
+    with pytest.raises(IndexError):
+        view[-1]
+    with pytest.raises(ValueError):
+        view.index('192.0.2.0')
+    with pytest.raises(ValueError):
+        view[::0]
+
+
+def test_ipset_index_view_orders_ipv4_before_ipv6():
+    view = IPSet(['192.0.2.0/31', '::192.0.2.0/127', '10.0.0.1/32', '::1/128']).index_view()
+
+    assert list(view) == [
+        IPAddress('10.0.0.1'),
+        IPAddress('192.0.2.0'),
+        IPAddress('192.0.2.1'),
+        IPAddress('::1'),
+        IPAddress('::192.0.2.0'),
+        IPAddress('::192.0.2.1'),
+    ]
+    assert view[0] == IPAddress('10.0.0.1')
+    assert view[-1] == IPAddress('::192.0.2.1')
+    assert view[-3] == IPAddress('::1')
+
+    assert view.rank('192.0.2.1') == 2
+    assert view.index('::192.0.2.0') == 4
+    assert view.rank('192.0.2.2') == 3
+    assert view.rank('::2') == 4
+    assert view.rank(IPAddress(2**32 - 1, 4)) == 3
+    assert view.rank('::') == 3
+    assert view.bisect_right('192.0.2.0') == 2
+    assert view.bisect_right('::192.0.2.1') == 6
+
+
+def test_ipset_index_view_uses_merged_cidr_ranges():
+    ipset = IPSet(
+        [
+            '192.0.2.0/32',
+            '192.0.2.1/32',
+            '192.0.2.1/32',
+            IPNetwork('192.0.2.0/31'),
+            '2001:db8::/127',
+            '2001:db8::1/128',
+        ]
+    )
+    view = ipset.index_view()
+
+    assert list(ipset.iter_cidrs()) == [
+        IPNetwork('192.0.2.0/31'),
+        IPNetwork('2001:db8::/127'),
+    ]
+    assert view.size == 4
+    assert list(view) == [
+        IPAddress('192.0.2.0'),
+        IPAddress('192.0.2.1'),
+        IPAddress('2001:db8::'),
+        IPAddress('2001:db8::1'),
+    ]
+    assert view.rank('192.0.2.0') == 0
+    assert view.rank('192.0.2.2') == 2
+    assert view.rank('2001:db8::2') == 4
+
+
+def test_ipset_index_view_slices_are_lazy_and_support_reverse():
+    view = IPSet(['192.0.2.0/30', '::/126']).index_view()
+
+    forward = view[::2]
+    reverse = view[::-2]
+
+    assert forward.size == 4
+    assert list(forward) == [
+        IPAddress('192.0.2.0'),
+        IPAddress('192.0.2.2'),
+        IPAddress('::'),
+        IPAddress('::2'),
+    ]
+    assert reverse.size == 4
+    assert list(reverse) == [
+        IPAddress('::3'),
+        IPAddress('::1'),
+        IPAddress('192.0.2.3'),
+        IPAddress('192.0.2.1'),
+    ]
+    assert reverse[-1] == IPAddress('192.0.2.1')
+    assert reverse[-2] == IPAddress('192.0.2.3')
+    assert list(forward[1:4]) == [IPAddress('192.0.2.2'), IPAddress('::'), IPAddress('::2')]
+    assert list(reverse[1:4]) == [
+        IPAddress('::1'),
+        IPAddress('192.0.2.3'),
+        IPAddress('192.0.2.1'),
+    ]
+    assert forward.index('::2') == 3
+    assert reverse.index('::1') == 1
+    assert forward.rank('192.0.2.3') == 2
+    assert reverse.rank('192.0.2.2') == 3
+    assert reverse.bisect_right('::1') == 2
+
+
+def test_ipset_index_view_is_an_immutable_snapshot():
+    ipset = IPSet(['192.0.2.0/31'])
+    view = ipset.index_view()
+    sliced = view[::-1]
+
+    ipset.add('192.0.2.2/31')
+    ipset.remove('192.0.2.0/32')
+
+    assert view.size == 2
+    assert list(view) == [IPAddress('192.0.2.0'), IPAddress('192.0.2.1')]
+    assert list(sliced) == [IPAddress('192.0.2.1'), IPAddress('192.0.2.0')]
+
+
+def test_ipset_index_view_large_ipv6_does_not_require_len_or_enumeration(monkeypatch):
+    network = IPNetwork('2001:db8::/64')
+    view = IPSet([network]).index_view()
+
+    def fail_on_len(*args, **kwargs):
+        raise AssertionError('address enumeration was used')
+
+    monkeypatch.setattr(IPSetIndexView, '__len__', fail_on_len)
+    assert view.size == network.size
+    assert view.size > sys.maxsize
+    assert view[-1] == IPAddress('2001:db8::ffff:ffff:ffff:ffff')
+    assert view[-2] == IPAddress('2001:db8::ffff:ffff:ffff:fffe')
+    assert view[-3] == IPAddress('2001:db8::ffff:ffff:ffff:fffd')
+    assert view.index('2001:db8::ffff:ffff:ffff:fffe') == network.size - 2
+    assert view.rank('2001:db8::ffff:ffff:ffff:fffe') == network.size - 2
+    assert view.bisect_right('2001:db8::ffff:ffff:ffff:ffff') == network.size
+    assert view.rank('2001:db8:0:1::') == network.size
+
+    with monkeypatch.context() as context:
+        context.setattr(IPSetIndexView, '__iter__', fail_on_len)
+        last_three = view[-3:]
+    assert last_three.size == 3
+    assert last_three[0] == IPAddress('2001:db8::ffff:ffff:ffff:fffd')
+    assert list(itertools.islice(last_three, 3)) == [
+        IPAddress('2001:db8::ffff:ffff:ffff:fffd'),
+        IPAddress('2001:db8::ffff:ffff:ffff:fffe'),
+        IPAddress('2001:db8::ffff:ffff:ffff:ffff'),
+    ]

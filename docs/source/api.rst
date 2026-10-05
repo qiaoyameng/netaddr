@@ -195,6 +195,9 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+.. autoclass:: netaddr.IPSetIndexView
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------

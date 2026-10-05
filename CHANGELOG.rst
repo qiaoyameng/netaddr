@@ -6,6 +6,11 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add immutable ordinal views for :class:`IPSet` with lazy slicing, ranks and
+  insertion positions.
+
 --------------
 Release: 1.3.0
 --------------
