@@ -38,6 +38,14 @@ __all__ = [
     'smallest_matching_cidr',
     'spanning_cidr',
     'IPSet',
+    'RFC6052IPSet',
+    'RFC6052Range',
+    'DEFAULT_NAT64_PREFIX',
+    'RFC6052_PREFIX_LENGTHS',
+    'embed_ipv4',
+    'extract_ipv4',
+    'embed_ipv4_set',
+    'extract_ipv4_set',
     'IPGlob',
     'cidr_to_glob',
     'glob_to_cidrs',
@@ -100,6 +108,17 @@ from netaddr.ip import (
 )
 
 from netaddr.ip.sets import IPSet
+
+from netaddr.ip.nat64 import (
+    DEFAULT_NAT64_PREFIX,
+    RFC6052_PREFIX_LENGTHS,
+    RFC6052IPSet,
+    RFC6052Range,
+    embed_ipv4,
+    embed_ipv4_set,
+    extract_ipv4,
+    extract_ipv4_set,
+)
 
 from netaddr.ip.glob import (
     IPGlob,

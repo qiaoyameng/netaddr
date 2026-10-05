@@ -195,6 +195,30 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+----------------------
+RFC 6052 NAT64 mapping
+----------------------
+
+RFC 6052 defines how IPv4 addresses are embedded in synthetic IPv6
+addresses. The single-address helpers support all allowed prefix lengths
+(``/32``, ``/40``, ``/48``, ``/56``, ``/64``, and ``/96``) and default to
+the well-known prefix ``64:ff9b::/96``.
+
+For IPv4 sets, prefixes shorter than ``/96`` create a sparse mapping because
+the final 32 bits are reserved zero. :class:`netaddr.RFC6052IPSet` preserves
+that mapping lazily and does not allocate an object for every mapped address.
+
+.. autodata:: netaddr.DEFAULT_NAT64_PREFIX
+.. autodata:: netaddr.RFC6052_PREFIX_LENGTHS
+.. autofunction:: netaddr.embed_ipv4
+.. autofunction:: netaddr.extract_ipv4
+.. autofunction:: netaddr.embed_ipv4_set
+.. autofunction:: netaddr.extract_ipv4_set
+.. autoclass:: netaddr.RFC6052Range
+    :members:
+.. autoclass:: netaddr.RFC6052IPSet
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------
