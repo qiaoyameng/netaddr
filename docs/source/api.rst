@@ -195,6 +195,39 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+--------------------------
+Sequential firewall rules
+--------------------------
+
+The firewall analyzer uses ordered first-match semantics. Each rule contains
+one or more CIDRs and optional exclusions. Rule reports separate same-decision
+redundancy from opposite-decision truncation, and returned address regions are
+merged CIDRs.
+
+.. autoclass:: netaddr.FirewallRule
+    :members:
+
+.. autoclass:: netaddr.FirewallAnalysis
+    :members:
+
+.. autoclass:: netaddr.RuleAnalysis
+    :members:
+
+.. autoclass:: netaddr.RuleShadow
+    :members:
+
+.. autoclass:: netaddr.PolicyDecision
+    :members:
+
+.. autoclass:: netaddr.DeletionVerification
+    :members:
+
+.. autofunction:: netaddr.analyze_firewall
+
+.. autofunction:: netaddr.compile_firewall_policy
+
+.. autofunction:: netaddr.verify_safe_deletions
+
 ---------------------------
 IP functions and generators
 ---------------------------

@@ -102,6 +102,7 @@ Changelog = "https://netaddr.readthedocs.io/en/latest/changes.html"
 
 [project.scripts]
 netaddr = "netaddr.cli:main"
+netaddr-firewall-analyzer = "netaddr.contrib.firewall_analyzer:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

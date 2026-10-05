@@ -71,6 +71,15 @@ __all__ = [
     'eui64_bare',
     'valid_eui64',
     'SubnetSplitter',
+    'FirewallRule',
+    'FirewallAnalysis',
+    'PolicyDecision',
+    'RuleAnalysis',
+    'RuleShadow',
+    'DeletionVerification',
+    'analyze_firewall',
+    'compile_firewall_policy',
+    'verify_safe_deletions',
 ]
 
 from netaddr.core import (
@@ -144,3 +153,14 @@ from netaddr.strategy.eui64 import (
 )
 
 from netaddr.contrib.subnet_splitter import SubnetSplitter
+from netaddr.contrib.firewall_analyzer import (
+    DeletionVerification,
+    FirewallAnalysis,
+    FirewallRule,
+    PolicyDecision,
+    RuleAnalysis,
+    RuleShadow,
+    analyze_firewall,
+    compile_firewall_policy,
+    verify_safe_deletions,
+)
