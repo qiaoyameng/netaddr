@@ -195,6 +195,23 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+------
+RFC 6052
+--------
+
+RFC 6052 defines an algorithmic mapping between IPv4 and IPv6 addresses used by
+NAT64. Supported prefix lengths are 32, 40, 48, 56, 64 and 96.
+
+.. autodata:: netaddr.RFC6052_ALLOWED_PREFIX_LENS
+.. autodata:: netaddr.RFC6052_WELL_KNOWN_PREFIX
+.. autofunction:: netaddr.rfc6052_embed
+.. autofunction:: netaddr.rfc6052_extract
+.. autofunction:: netaddr.rfc6052_embed_set
+.. autoclass:: netaddr.RFC6052IPSet
+    :members:
+.. autoclass:: netaddr.RFC6052Segment
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------

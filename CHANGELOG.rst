@@ -6,6 +6,11 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add RFC 6052 NAT64 IPv4/IPv6 address and :class:`IPSet` embedding with lazy,
+  exact segmentation for non-/96 prefixes.
+
 --------------
 Release: 1.3.0
 --------------

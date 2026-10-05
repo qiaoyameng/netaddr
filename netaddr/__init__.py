@@ -71,6 +71,13 @@ __all__ = [
     'eui64_bare',
     'valid_eui64',
     'SubnetSplitter',
+    'RFC6052_ALLOWED_PREFIX_LENS',
+    'RFC6052_WELL_KNOWN_PREFIX',
+    'RFC6052IPSet',
+    'RFC6052Segment',
+    'rfc6052_embed',
+    'rfc6052_extract',
+    'rfc6052_embed_set',
 ]
 
 from netaddr.core import (
@@ -114,6 +121,16 @@ from netaddr.ip.glob import (
 from netaddr.ip.nmap import valid_nmap_range, iter_nmap_range
 
 from netaddr.ip.rfc1924 import base85_to_ipv6, ipv6_to_base85
+
+from netaddr.ip.rfc6052 import (
+    RFC6052_ALLOWED_PREFIX_LENS,
+    RFC6052_WELL_KNOWN_PREFIX,
+    RFC6052IPSet,
+    RFC6052Segment,
+    rfc6052_embed,
+    rfc6052_extract,
+    rfc6052_embed_set,
+)
 
 from netaddr.eui import EUI, IAB, OUI
 
