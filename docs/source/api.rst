@@ -195,6 +195,23 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+--------------
+Routing tables
+--------------
+
+The `RoutingTable` class simulates how a router forwards packets: the most
+specific matching prefix wins, ties within a prefix are broken by metric
+and equal-metric routes form an ECMP set of next hops. Blackhole routes
+discard traffic. Routes are tracked per source so withdrawing one source
+never disturbs equivalent routes from others. Updates report the minimal
+set of CIDR blocks whose forwarding result changed.
+
+.. autoclass:: netaddr.RoutingTable
+    :members:
+
+.. autoclass:: netaddr.RouteResult
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------

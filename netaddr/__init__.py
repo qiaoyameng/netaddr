@@ -101,6 +101,8 @@ from netaddr.ip import (
 
 from netaddr.ip.sets import IPSet
 
+from netaddr.ip.routing import RouteResult, RoutingTable
+
 from netaddr.ip.glob import (
     IPGlob,
     cidr_to_glob,
