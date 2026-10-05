@@ -6,6 +6,12 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add :func:`cidr_summarize` and :meth:`IPSet.summarize_cidrs` for finding
+  the minimum extra-address CIDR combination that covers an :class:`IPSet`
+  without including forbidden addresses.
+
 --------------
 Release: 1.3.0
 --------------

@@ -195,6 +195,11 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+.. autoclass:: netaddr.CIDRSummary
+    :members:
+
+.. autofunction:: netaddr.cidr_summarize
+
 ---------------------------
 IP functions and generators
 ---------------------------

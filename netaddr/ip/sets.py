@@ -78,6 +78,503 @@ def _iter_merged_ranges(sorted_ranges):
     yield (IPAddress(current_start, current_version), IPAddress(current_stop, current_version))
 
 
+class _CIDRFamilySummary(object):
+    __slots__ = (
+        'version',
+        'feasible',
+        'reason',
+        'cidrs',
+        'rules_used',
+        'minimum_rules',
+        'target_addresses',
+        'extra_addresses',
+        'extra_ranges',
+    )
+
+    def __init__(
+        self,
+        version,
+        feasible,
+        reason=None,
+        cidrs=None,
+        rules_used=0,
+        minimum_rules=None,
+        target_addresses=0,
+        extra_addresses=0,
+        extra_ranges=None,
+    ):
+        self.version = version
+        self.feasible = feasible
+        self.reason = reason
+        self.cidrs = [] if cidrs is None else cidrs
+        self.rules_used = rules_used
+        self.minimum_rules = minimum_rules
+        self.target_addresses = target_addresses
+        self.extra_addresses = extra_addresses
+        self.extra_ranges = [] if extra_ranges is None else extra_ranges
+
+
+class CIDRSummary(object):
+    """
+    Result of a bounded CIDR summarization.
+
+    IPv4 and IPv6 rules are optimized separately while sharing one total rule
+    budget. The combined ``cidrs`` sequence is sorted with IPv4 networks
+    before IPv6 networks.
+    """
+
+    __slots__ = (
+        'max_rules',
+        'feasible',
+        'reason',
+        'cidrs',
+        'rules_used',
+        'target_addresses',
+        'extra_addresses',
+        'extra_ranges',
+        'minimum_rules',
+        'ipv4',
+        'ipv6',
+    )
+
+    def __init__(self, max_rules, ipv4, ipv6, overall_feasible=None):
+        self.max_rules = max_rules
+        self.ipv4 = ipv4
+        self.ipv6 = ipv6
+        if overall_feasible is None:
+            self.feasible = ipv4.feasible and ipv6.feasible
+        else:
+            self.feasible = overall_feasible
+        self.minimum_rules = (ipv4.minimum_rules, ipv6.minimum_rules)
+
+        if self.feasible:
+            self.reason = None
+            self.cidrs = sorted(_itertools.chain(ipv4.cidrs, ipv6.cidrs))
+            self.rules_used = ipv4.rules_used + ipv6.rules_used
+            self.target_addresses = ipv4.target_addresses + ipv6.target_addresses
+            self.extra_addresses = ipv4.extra_addresses + ipv6.extra_addresses
+            self.extra_ranges = list(
+                _itertools.chain(ipv4.extra_ranges, ipv6.extra_ranges)
+            )
+        else:
+            overlapping = not ipv4.feasible and ipv4.reason == 'target and forbidden sets overlap'
+            overlapping = overlapping or (
+                not ipv6.feasible and ipv6.reason == 'target and forbidden sets overlap'
+            )
+            if overlapping:
+                self.reason = 'target and forbidden sets overlap'
+            else:
+                self.reason = 'rule limit is too small'
+            self.cidrs = []
+            self.rules_used = 0
+            self.target_addresses = ipv4.target_addresses + ipv6.target_addresses
+            self.extra_addresses = 0
+            self.extra_ranges = []
+
+    def __repr__(self):
+        if self.feasible:
+            return (
+                'CIDRSummary(feasible=True, rules_used=%r, extra_addresses=%r, cidrs=%r)'
+                % (self.rules_used, self.extra_addresses, [str(cidr) for cidr in self.cidrs])
+            )
+        return 'CIDRSummary(feasible=False, reason=%r)' % self.reason
+
+
+class _PrefixNode(object):
+    __slots__ = (
+        'depth',
+        'value',
+        'children',
+        'is_target',
+        'is_forbidden',
+        'has_target',
+        'has_forbidden',
+        'size',
+        'target_size',
+        'minimum_rules',
+        'costs',
+    )
+
+    def __init__(self, depth, value, size):
+        self.depth = depth
+        self.value = value
+        self.children = {}
+        self.is_target = False
+        self.is_forbidden = False
+        self.has_target = False
+        self.has_forbidden = False
+        self.size = size
+        self.target_size = 0
+        self.minimum_rules = 0
+        self.costs = {}
+
+
+def _validate_rule_limit(max_rules):
+    if isinstance(max_rules, bool) or not isinstance(max_rules, int):
+        raise TypeError('max_rules must be a non-negative integer')
+    if max_rules < 0:
+        raise ValueError('max_rules must be a non-negative integer')
+
+
+def _split_ip_set(ip_set):
+    families = {4: IPSet(), 6: IPSet()}
+    for cidr in ip_set.iter_cidrs():
+        families[cidr.version]._cidrs[cidr] = True
+    return families
+
+
+def _build_prefix_tree(version, target, forbidden):
+    width = version == 4 and 32 or 128
+    root = _PrefixNode(0, 0, 1 << width)
+
+    for ip_set, attribute in ((target, 'is_target'), (forbidden, 'is_forbidden')):
+        for cidr in ip_set.iter_cidrs():
+            node = root
+            value = cidr._value
+            for depth in range(cidr.prefixlen):
+                bit = (value >> (width - depth - 1)) & 1
+                try:
+                    node = node.children[bit]
+                except KeyError:
+                    child_depth = depth + 1
+                    child = _PrefixNode(
+                        child_depth,
+                        value & (-(1 << (width - child_depth))),
+                        1 << (width - child_depth),
+                    )
+                    node.children[bit] = child
+                    node = child
+            setattr(node, attribute, True)
+
+    return root
+
+
+def _empty_child_state(node):
+    if node is None:
+        return {0: 0}
+    return node.costs
+
+
+def _calculate_prefix_costs(root, max_rules):
+    stack = [(root, False)]
+    while stack:
+        node, visited = stack.pop()
+        if not visited:
+            stack.append((node, True))
+            if 1 in node.children:
+                stack.append((node.children[1], False))
+            if 0 in node.children:
+                stack.append((node.children[0], False))
+            continue
+
+        node.has_target = node.is_target
+        node.has_forbidden = node.is_forbidden
+        node.target_size = node.size if node.is_target else 0
+
+        for child in node.children.values():
+            node.has_target = node.has_target or child.has_target
+            node.has_forbidden = node.has_forbidden or child.has_forbidden
+            node.target_size += child.target_size
+
+        if not node.has_target:
+            node.minimum_rules = 0
+            node.costs = {0: 0}
+            continue
+
+        if node.is_target:
+            node.minimum_rules = 1
+            if max_rules:
+                node.costs = {1: 0}
+            continue
+
+        if node.has_forbidden:
+            node.minimum_rules = sum(
+                child.minimum_rules for child in node.children.values() if child.has_target
+            )
+        else:
+            node.minimum_rules = 1
+
+        if node.minimum_rules > max_rules:
+            continue
+
+        costs = {}
+        if not node.has_forbidden:
+            costs[1] = node.size - node.target_size
+
+        left = node.children.get(0)
+        right = node.children.get(1)
+        left_costs = _empty_child_state(left)
+        right_costs = _empty_child_state(right)
+
+        for left_rules, left_cost in left_costs.items():
+            for right_rules, right_cost in right_costs.items():
+                rules = left_rules + right_rules
+                if rules > max_rules:
+                    continue
+                cost = left_cost + right_cost
+                if rules not in costs or cost < costs[rules]:
+                    costs[rules] = cost
+
+        node.costs = costs
+
+
+def _network_for_node(node, version):
+    return IPNetwork((node.value, node.depth), version=version)
+
+
+def _recover_cidrs(root, rules, version):
+    chosen = {}
+
+    def recover(node, rule_count):
+        if rule_count == 0:
+            return ()
+
+        key = (node, rule_count)
+        if key in chosen:
+            return chosen[key]
+
+        if node.is_target:
+            result = (_network_for_node(node, version),)
+            chosen[key] = result
+            return result
+
+        best = None
+        if not node.has_forbidden and rule_count == 1:
+            self_cost = node.size - node.target_size
+            if node.costs.get(1) == self_cost:
+                best = (_network_for_node(node, version),)
+
+        left = node.children.get(0)
+        right = node.children.get(1)
+        left_costs = _empty_child_state(left)
+        right_costs = _empty_child_state(right)
+
+        for left_rules in sorted(left_costs):
+            right_rules = rule_count - left_rules
+            if right_rules not in right_costs:
+                continue
+            candidate_cost = left_costs[left_rules] + right_costs[right_rules]
+            if candidate_cost != node.costs[rule_count]:
+                continue
+            candidate = (
+                recover(left, left_rules) if left is not None else ()
+            ) + (recover(right, right_rules) if right is not None else ())
+            if best is None or candidate < best:
+                best = candidate
+
+        chosen[key] = best
+        return best
+
+    return recover(root, rules)
+
+
+def _family_solution(version, target, cidrs, minimum_rules, target_size):
+    covered = IPSet(cidrs)
+    extra_set = covered.difference(target)
+    return _CIDRFamilySummary(
+        version,
+        True,
+        cidrs=list(cidrs),
+        rules_used=len(cidrs),
+        minimum_rules=minimum_rules,
+        target_addresses=target_size,
+        extra_addresses=extra_set.size,
+        extra_ranges=list(extra_set.iter_ipranges()),
+    )
+
+
+def _summarize_sets(target, forbidden, max_rules):
+    target_families = _split_ip_set(target)
+    forbidden_families = _split_ip_set(forbidden)
+    family_data = []
+
+    for version in (4, 6):
+        target_family = target_families[version]
+        forbidden_family = forbidden_families[version]
+        target_size = target_family.size
+
+        if not target_family._cidrs:
+            family_data.append(
+                (
+                    version,
+                    target_family,
+                    0,
+                    {0: 0},
+                    {0: ()},
+                    None,
+                    target_size,
+                )
+            )
+            continue
+
+        if target_family.intersection(forbidden_family):
+            if version == 4:
+                ipv4 = _CIDRFamilySummary(
+                    4,
+                    False,
+                    reason='target and forbidden sets overlap',
+                    target_addresses=target_families[4].size,
+                )
+                ipv6 = _CIDRFamilySummary(6, True, minimum_rules=0)
+            else:
+                ipv4 = _CIDRFamilySummary(4, True, minimum_rules=0)
+                ipv6 = _CIDRFamilySummary(
+                    6,
+                    False,
+                    reason='target and forbidden sets overlap',
+                    target_addresses=target_families[6].size,
+                )
+            return CIDRSummary(
+                max_rules,
+                ipv4,
+                ipv6,
+            )
+
+        root = _build_prefix_tree(version, target_family, forbidden_family)
+        _calculate_prefix_costs(root, max_rules)
+        family_data.append(
+            (
+                version,
+                target_family,
+                root.minimum_rules,
+                root.costs,
+                None,
+                root,
+                target_size,
+            )
+        )
+
+    best = None
+    for ipv4_rules, ipv4_cost in family_data[0][3].items():
+        for ipv6_rules, ipv6_cost in family_data[1][3].items():
+            rules_used = ipv4_rules + ipv6_rules
+            if rules_used > max_rules:
+                continue
+
+            selected = []
+            for item, rule_count in zip(family_data, (ipv4_rules, ipv6_rules)):
+                (
+                    version,
+                    target_family,
+                    _minimum_rules,
+                    _costs,
+                    cached_cidrs,
+                    root,
+                    _target_size,
+                ) = item
+                if cached_cidrs is not None:
+                    family_cidrs = cached_cidrs[rule_count]
+                else:
+                    family_cidrs = _recover_cidrs(root, rule_count, version)
+                selected.append(family_cidrs)
+
+            candidate_key = (
+                ipv4_cost + ipv6_cost,
+                rules_used,
+                selected[0],
+                selected[1],
+            )
+            if best is None or candidate_key < best[0]:
+                best = (candidate_key, selected)
+
+    if best is not None:
+        family_results = []
+        for item, family_cidrs in zip(family_data, best[1]):
+            (
+                version,
+                target_family,
+                minimum_rules,
+                _costs,
+                _cached_cidrs,
+                _root,
+                _target_size,
+            ) = item
+            family_results.append(
+                _family_solution(
+                    version,
+                    target_family,
+                    family_cidrs,
+                    minimum_rules,
+                    item[6],
+                )
+            )
+        return CIDRSummary(max_rules, family_results[0], family_results[1])
+
+    family_results = []
+    for item in family_data:
+        (
+            version,
+            target_family,
+            minimum_rules,
+            costs,
+            cached_cidrs,
+            root,
+            target_size,
+        ) = item
+        if not costs:
+            family_results.append(
+                _CIDRFamilySummary(
+                    version,
+                    False,
+                    reason='rule limit is too small',
+                    minimum_rules=minimum_rules,
+                    target_addresses=target_size,
+                )
+            )
+        else:
+            rules = min(costs, key=lambda count: (costs[count], count))
+            if cached_cidrs is not None:
+                family_cidrs = cached_cidrs[rules]
+            else:
+                family_cidrs = _recover_cidrs(root, rules, version)
+            family_results.append(
+                _family_solution(
+                    version,
+                    target_family,
+                    family_cidrs,
+                    minimum_rules,
+                    target_size,
+                )
+            )
+    return CIDRSummary(
+        max_rules, family_results[0], family_results[1], overall_feasible=False
+    )
+
+
+def cidr_summarize(target, forbidden, max_rules):
+    """
+    Find CIDRs covering every target address without including a forbidden
+    address.
+
+    The optimizer works on the binary CIDR prefix tree. It never iterates over
+    individual addresses, so IPv6 block sizes are represented as exact Python
+    integers rather than expanded.
+
+    Among feasible combinations, this minimizes covered addresses outside the
+    target set. Ties use the smaller rule count, then the lexicographically
+    smaller sorted CIDR list. IPv4 and IPv6 use separate prefix trees and
+    share ``max_rules`` as one total rule budget.
+
+    :param target: an :class:`IPSet`, or an iterable accepted by
+        ``IPSet(...)``, containing every address that must be covered.
+
+    :param forbidden: an :class:`IPSet` or iterable containing addresses that
+        no returned CIDR may contain.
+
+    :param max_rules: maximum total number of CIDR rules.
+
+    :return: a :class:`CIDRSummary`. Its ``feasible`` attribute is ``False``
+        when target and forbidden overlap or more rules are required.
+    """
+    _validate_rule_limit(max_rules)
+    if not isinstance(target, IPSet):
+        target = IPSet(target)
+    if not isinstance(forbidden, IPSet):
+        forbidden = IPSet(forbidden)
+
+    return _summarize_sets(target, forbidden, max_rules)
+
+
 class IPSet(object):
     """
     Represents an unordered collection (set) of unique IP addresses and
@@ -744,3 +1241,20 @@ class IPSet(object):
 
         for start, stop in _iter_merged_ranges(sorted_ranges):
             yield IPRange(start, stop)
+
+    def summarize_cidrs(self, forbidden, max_rules):
+        """
+        Summarize this IP set into at most ``max_rules`` CIDRs while avoiding
+        every address in ``forbidden``.
+
+        See :func:`cidr_summarize` for the optimization and tie-breaking
+        rules.
+
+        :param forbidden: an :class:`IPSet` or iterable of addresses and
+            networks that may not be covered.
+
+        :param max_rules: maximum total number of CIDRs.
+
+        :return: a :class:`CIDRSummary`.
+        """
+        return cidr_summarize(self, forbidden, max_rules)
