@@ -6,7 +6,9 @@
 """Set based operations for IP addresses and subnets."""
 
 import itertools as _itertools
+import operator as _operator
 import sys as _sys
+from bisect import bisect_right as _bisect_right
 
 from netaddr.ip import IPNetwork, IPAddress, IPRange, cidr_merge, cidr_exclude, iprange_to_cidrs
 
@@ -255,6 +257,14 @@ class IPSet(object):
         :return: an iterator over individual IP subnets within this IP set.
         """
         return sorted(self._cidrs)
+
+    def ordinal_view(self):
+        """
+        :return: an immutable :class:`IPSetOrdinalView` of the individual IP
+            addresses in this IP set. The view snapshots the current set
+            contents, so later changes to this IP set do not affect it.
+        """
+        return IPSetOrdinalView(self)
 
     def add(self, addr, flags=0):
         """
@@ -744,3 +754,260 @@ class IPSet(object):
 
         for start, stop in _iter_merged_ranges(sorted_ranges):
             yield IPRange(start, stop)
+
+
+def _slice_length(start, stop, step):
+    """Number of elements produced by a normalized (start, stop, step) triple.
+
+    Computed arithmetically so it works for values exceeding sys.maxsize,
+    where len(range(start, stop, step)) would raise OverflowError.
+    """
+    if step > 0:
+        if stop <= start:
+            return 0
+        return (stop - start + step - 1) // step
+    if start <= stop:
+        return 0
+    return (start - stop - step - 1) // (-step)
+
+
+class IPSetOrdinalView(object):
+    """
+    An immutable, indexable view of the individual IP addresses of an IP set.
+
+    Addresses are ordered numerically, with all IPv4 addresses sorting before
+    all IPv6 addresses. The view snapshots the set's CIDR blocks when it is
+    created, so subsequent changes to the source IP set do not affect it.
+
+    Indexing, ranking and slicing are computed arithmetically from CIDR
+    boundaries in O(log n) time (where n is the number of CIDR blocks), so
+    the view works even for sets far too large to enumerate and whose size
+    does not fit into a platform integer (use the ``size`` property rather
+    than ``len()`` for such sets).
+    """
+
+    __slots__ = ('_runs', '_starts', '_offsets', '_size')
+
+    def __init__(self, ipset):
+        """
+        Constructor.
+
+        :param ipset: the IP set to snapshot.
+        """
+        runs = []
+        starts = []
+        offsets = [0]
+        total = 0
+        for cidr in ipset.iter_cidrs():
+            version = cidr.version
+            first = cidr.first
+            last = cidr.last
+            runs.append((version, first, last))
+            starts.append((version, first))
+            total += last - first + 1
+            offsets.append(total)
+        self._runs = tuple(runs)
+        self._starts = tuple(starts)
+        self._offsets = tuple(offsets)
+        self._size = total
+
+    @property
+    def size(self):
+        """The number of individual IP addresses in this view."""
+        return self._size
+
+    def __len__(self):
+        size = self._size
+        if size > _sys.maxsize:
+            raise IndexError(
+                'view contains more than %d (sys.maxsize) IP addresses!'
+                'Use the .size property instead.' % _sys.maxsize
+            )
+        return size
+
+    def _address_at(self, ordinal):
+        """Address at non-negative ordinal, without bounds checking."""
+        run_idx = _bisect_right(self._offsets, ordinal) - 1
+        version, first, _ = self._runs[run_idx]
+        return IPAddress(first + (ordinal - self._offsets[run_idx]), version)
+
+    def __getitem__(self, index):
+        """
+        :param index: an integer index (negative indices count back from the
+            end) or a slice. Slices may use any non-zero step, in either
+            direction, and are returned as lazy views that do not
+            materialize their addresses up front.
+
+        :return: an ``IPAddress`` for integer indexes, or a lazy slice view
+            for slices.
+        """
+        if isinstance(index, slice):
+            start, stop, step = index.indices(self._size)
+            return _OrdinalSlice(self, start, stop, step)
+        index = _operator.index(index)
+        if index < 0:
+            index += self._size
+        if not 0 <= index < self._size:
+            raise IndexError('IP set ordinal view index out of range')
+        return self._address_at(index)
+
+    def __iter__(self):
+        """
+        :return: an iterator over the IP addresses in this view, in order.
+        """
+        return iter(_OrdinalSlice(self, 0, self._size, 1))
+
+    def __contains__(self, ip):
+        """
+        :param ip: an IP address.
+
+        :return: ``True`` if the IP address is a member of this view.
+        """
+        try:
+            self.rank(ip)
+            return True
+        except ValueError:
+            return False
+
+    def rank(self, ip):
+        """
+        The ordinal position of a member IP address within this view.
+
+        :param ip: an IP address that is a member of the viewed set.
+
+        :return: the zero-based index of the address in the view's ordering.
+
+        :raises ValueError: if the address is not a member of the viewed set.
+        """
+        ip = IPAddress(ip)
+        run_idx = _bisect_right(self._starts, (ip.version, ip.value)) - 1
+        if run_idx >= 0:
+            version, first, last = self._runs[run_idx]
+            if version == ip.version and first <= ip.value <= last:
+                return self._offsets[run_idx] + (ip.value - first)
+        raise ValueError('%r is not a member of this IP set view' % (ip,))
+
+    def insertion_index(self, ip):
+        """
+        The number of members of this view that sort before the given IP
+        address. For a member this equals its rank; for a non-member it is
+        the index at which the address would be inserted to keep the view
+        ordered (``bisect_left`` semantics). The address does not need to be
+        a member of the viewed set.
+
+        :param ip: an IP address.
+
+        :return: the count of members strictly less than the address.
+        """
+        ip = IPAddress(ip)
+        run_idx = _bisect_right(self._starts, (ip.version, ip.value)) - 1
+        if run_idx < 0:
+            return 0
+        version, first, last = self._runs[run_idx]
+        if version != ip.version:
+            # All runs up to and including run_idx belong to an earlier IP
+            # version, so every one of their members sorts before ip.
+            return self._offsets[run_idx + 1]
+        if ip.value <= first:
+            return self._offsets[run_idx]
+        if ip.value > last:
+            return self._offsets[run_idx + 1]
+        return self._offsets[run_idx] + (ip.value - first)
+
+    def __repr__(self):
+        return '%s(%r)' % (self.__class__.__name__, self._runs)
+
+
+class _OrdinalSlice(object):
+    """
+    A lazy, immutable stepped view over an :class:`IPSetOrdinalView`.
+
+    Created by slicing an ordinal view (or another slice); addresses are
+    produced on demand and never materialized up front.
+    """
+
+    __slots__ = ('_view', '_start', '_stop', '_step', '_size')
+
+    def __init__(self, view, start, stop, step):
+        self._view = view
+        self._start = start
+        self._stop = stop
+        self._step = step
+        self._size = _slice_length(start, stop, step)
+
+    @property
+    def size(self):
+        """The number of individual IP addresses in this slice."""
+        return self._size
+
+    def __len__(self):
+        size = self._size
+        if size > _sys.maxsize:
+            raise IndexError(
+                'slice contains more than %d (sys.maxsize) IP addresses!'
+                'Use the .size property instead.' % _sys.maxsize
+            )
+        return size
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(self._size)
+            return _OrdinalSlice(
+                self._view,
+                self._start + start * self._step,
+                self._start + stop * self._step,
+                self._step * step,
+            )
+        index = _operator.index(index)
+        if index < 0:
+            index += self._size
+        if not 0 <= index < self._size:
+            raise IndexError('IP set ordinal slice index out of range')
+        return self._view._address_at(self._start + index * self._step)
+
+    def __iter__(self):
+        runs = self._view._runs
+        offsets = self._view._offsets
+        step = self._step
+        stop = self._stop
+        pos = self._start
+        if step > 0:
+            run_indices = range(len(runs))
+        else:
+            run_indices = range(len(runs) - 1, -1, -1)
+        for run_idx in run_indices:
+            version, first, _ = runs[run_idx]
+            base = offsets[run_idx]
+            lo = base
+            hi = offsets[run_idx + 1] - 1
+            if step > 0:
+                # Positions in this slice satisfy pos < stop.
+                if hi >= stop:
+                    hi = stop - 1
+                if pos > hi:
+                    continue
+                if pos < lo:
+                    pos += ((lo - pos + step - 1) // step) * step
+                while pos <= hi:
+                    yield IPAddress(first + (pos - base), version)
+                    pos += step
+            else:
+                # Positions in this slice satisfy pos > stop.
+                if lo <= stop:
+                    lo = stop + 1
+                if pos < lo:
+                    continue
+                if pos > hi:
+                    pos -= ((pos - hi - step - 1) // (-step)) * (-step)
+                while pos >= lo:
+                    yield IPAddress(first + (pos - base), version)
+                    pos += step
+
+    def __repr__(self):
+        return '%s(%r, %r, %r, %r)' % (
+            self.__class__.__name__,
+            self._view,
+            self._start,
+            self._stop,
+            self._step,
+        )

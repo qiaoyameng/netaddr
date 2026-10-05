@@ -38,6 +38,7 @@ __all__ = [
     'smallest_matching_cidr',
     'spanning_cidr',
     'IPSet',
+    'IPSetOrdinalView',
     'IPGlob',
     'cidr_to_glob',
     'glob_to_cidrs',
@@ -99,7 +100,7 @@ from netaddr.ip import (
     spanning_cidr,
 )
 
-from netaddr.ip.sets import IPSet
+from netaddr.ip.sets import IPSet, IPSetOrdinalView
 
 from netaddr.ip.glob import (
     IPGlob,
