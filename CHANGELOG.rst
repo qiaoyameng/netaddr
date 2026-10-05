@@ -6,6 +6,16 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add scoped (zone-indexed) IPv6 support: :class:`Zone`, :data:`ANY_ZONE`,
+  :class:`ScopedIPv6Address`, :class:`ScopedIPv6Network` and
+  :class:`ScopedIPSet`.  Zones are compared by caller-supplied identifier
+  strings (never resolved against system interfaces), the wildcard zone
+  must be requested explicitly, and intersection/union/difference are
+  supported across network ranges and zones.  Existing scope-less
+  :class:`IPAddress` equality rules are unchanged.
+
 --------------
 Release: 1.3.0
 --------------

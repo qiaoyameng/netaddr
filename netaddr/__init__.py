@@ -38,6 +38,11 @@ __all__ = [
     'smallest_matching_cidr',
     'spanning_cidr',
     'IPSet',
+    'ANY_ZONE',
+    'ScopedIPSet',
+    'ScopedIPv6Address',
+    'ScopedIPv6Network',
+    'Zone',
     'IPGlob',
     'cidr_to_glob',
     'glob_to_cidrs',
@@ -100,6 +105,14 @@ from netaddr.ip import (
 )
 
 from netaddr.ip.sets import IPSet
+
+from netaddr.ip.scoped import (
+    ANY_ZONE,
+    ScopedIPSet,
+    ScopedIPv6Address,
+    ScopedIPv6Network,
+    Zone,
+)
 
 from netaddr.ip.glob import (
     IPGlob,
