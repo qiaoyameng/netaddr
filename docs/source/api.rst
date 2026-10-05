@@ -213,6 +213,34 @@ The following are a set of useful helper functions related to the various format
 .. autofunction:: netaddr.smallest_matching_cidr
 .. autofunction:: netaddr.spanning_cidr
 
+---------------------
+Reverse DNS delegation
+---------------------
+
+The reverse DNS planner generates offline zone plans for IPv4 classless
+delegations (:rfc:`2317`) and nibble-aligned IPv6 delegations. It does not
+send DNS requests or assume that network and broadcast addresses are unusable.
+
+.. autoclass:: netaddr.ReverseDNSPlanner
+    :members:
+
+.. autoclass:: netaddr.ReverseDNSPlan
+    :members:
+
+.. autoclass:: netaddr.ReverseDNSDelegation
+    :members:
+
+.. autoclass:: netaddr.NSRecord
+    :members:
+
+.. autoclass:: netaddr.CNAMERecord
+    :members:
+
+.. autoclass:: netaddr.PTRRecord
+    :members:
+
+.. autofunction:: netaddr.plan_reverse_dns_delegation
+
 ---------------------------------------
 MAC addresses and the IEEE EUI standard
 ---------------------------------------

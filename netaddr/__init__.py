@@ -70,7 +70,14 @@ __all__ = [
     'eui64_cisco',
     'eui64_bare',
     'valid_eui64',
+    'CNAMERecord',
+    'NSRecord',
+    'PTRRecord',
+    'ReverseDNSDelegation',
+    'ReverseDNSPlan',
+    'ReverseDNSPlanner',
     'SubnetSplitter',
+    'plan_reverse_dns_delegation',
 ]
 
 from netaddr.core import (
@@ -144,3 +151,13 @@ from netaddr.strategy.eui64 import (
 )
 
 from netaddr.contrib.subnet_splitter import SubnetSplitter
+
+from netaddr.contrib.reverse_dns import (
+    CNAMERecord,
+    NSRecord,
+    PTRRecord,
+    ReverseDNSDelegation,
+    ReverseDNSPlan,
+    ReverseDNSPlanner,
+    plan_reverse_dns_delegation,
+)
