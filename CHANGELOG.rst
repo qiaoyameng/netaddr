@@ -6,6 +6,16 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add :class:`ReverseDNSDelegationPlanner` for generating reverse DNS
+  delegation plans: classless :rfc:`2317` delegation (CNAME + tagged-zone NS
+  records) for non-octet-aligned IPv4 blocks and nibble-boundary zones for
+  IPv6.  It reports the records each parent and child zone must publish, keeps
+  network and broadcast addresses, splits non-contiguous and cross-boundary
+  ranges into non-overlapping plans, and supports both streaming and explicit
+  PTR record budgets.  No DNS requests are made.
+
 --------------
 Release: 1.3.0
 --------------

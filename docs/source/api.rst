@@ -195,6 +195,42 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+----------------------------
+Reverse DNS delegation plans
+----------------------------
+
+These helpers work out which records a parent reverse zone and each
+delegated child zone have to publish.  IPv4 blocks that are not octet
+aligned (such as a ``/28``) use the classless delegation scheme from
+RFC 2317; IPv6 blocks are split at nibble (4 bit) boundaries.  Nothing
+here sends any DNS traffic.
+
+.. autoclass:: netaddr.ReverseDNSDelegationPlanner
+    :members:
+
+.. autoclass:: netaddr.DelegationPlan
+    :members:
+
+.. autoclass:: netaddr.ReverseZone
+    :members:
+
+.. autoclass:: netaddr.DNSRecord
+    :members:
+
+.. autoclass:: netaddr.RFC2317LabelRule
+    :members:
+
+.. autoclass:: netaddr.DashRangeLabelRule
+    :members:
+
+.. autoclass:: netaddr.CIDRLabelRule
+    :members:
+
+.. autoclass:: netaddr.PTRBudgetExceeded
+    :members:
+
+.. autofunction:: netaddr.plan_reverse_delegation
+
 ---------------------------
 IP functions and generators
 ---------------------------

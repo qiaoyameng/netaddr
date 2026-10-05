@@ -71,6 +71,15 @@ __all__ = [
     'eui64_bare',
     'valid_eui64',
     'SubnetSplitter',
+    'ReverseDNSDelegationPlanner',
+    'RFC2317LabelRule',
+    'DashRangeLabelRule',
+    'CIDRLabelRule',
+    'DelegationPlan',
+    'ReverseZone',
+    'DNSRecord',
+    'PTRBudgetExceeded',
+    'plan_reverse_delegation',
 ]
 
 from netaddr.core import (
@@ -144,3 +153,15 @@ from netaddr.strategy.eui64 import (
 )
 
 from netaddr.contrib.subnet_splitter import SubnetSplitter
+
+from netaddr.contrib.reverse_delegation import (
+    CIDRLabelRule,
+    DNSRecord,
+    DashRangeLabelRule,
+    DelegationPlan,
+    PTRBudgetExceeded,
+    ReverseDNSDelegationPlanner,
+    ReverseZone,
+    RFC2317LabelRule,
+    plan_reverse_delegation,
+)
