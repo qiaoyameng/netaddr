@@ -71,6 +71,10 @@ __all__ = [
     'eui64_bare',
     'valid_eui64',
     'SubnetSplitter',
+    'RouteTable',
+    'RouteEntry',
+    'ForwardingDecision',
+    'BLACKHOLE',
 ]
 
 from netaddr.core import (
@@ -144,3 +148,9 @@ from netaddr.strategy.eui64 import (
 )
 
 from netaddr.contrib.subnet_splitter import SubnetSplitter
+from netaddr.contrib.route_table import (
+    BLACKHOLE,
+    ForwardingDecision,
+    RouteEntry,
+    RouteTable,
+)
