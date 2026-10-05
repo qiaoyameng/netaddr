@@ -195,6 +195,33 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+-------------------
+CIDR summarisation
+-------------------
+
+Routing devices usually accept only a limited number of CIDR rules while
+the :class:`~netaddr.IPSet` to cover can be highly fragmented. These
+functions choose at most ``max_rules`` CIDR blocks that cover every target
+address, never cover any forbidden address, and minimise the number of
+extra (non-target) addresses. IPv4 and IPv6 are computed independently.
+
+When several solutions share the same minimum extra count and rule count,
+the one with the lexicographically smallest sorted list of CIDRs (ordered
+by network address then prefix length) is returned. When no cover exists
+within the rule limit, the result reports ``feasible = False`` and the true
+``minimum_rules`` required; the rule limit is never silently exceeded.
+
+All cardinalities are exact Python integers, so extra counts up to
+``2 ** 128`` remain precise. The solver runs over the prefix trie and never
+enumerates the address space.
+
+.. autofunction:: netaddr.summarize_ipset
+.. autofunction:: netaddr.summarize_ipsets
+.. autoclass:: netaddr.AggregationResult
+    :members:
+.. autoclass:: netaddr.ExtraRange
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------

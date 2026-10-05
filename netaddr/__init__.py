@@ -38,6 +38,10 @@ __all__ = [
     'smallest_matching_cidr',
     'spanning_cidr',
     'IPSet',
+    'ExtraRange',
+    'AggregationResult',
+    'summarize_ipset',
+    'summarize_ipsets',
     'IPGlob',
     'cidr_to_glob',
     'glob_to_cidrs',
@@ -100,6 +104,13 @@ from netaddr.ip import (
 )
 
 from netaddr.ip.sets import IPSet
+
+from netaddr.ip.summarization import (
+    ExtraRange,
+    AggregationResult,
+    summarize_ipset,
+    summarize_ipsets,
+)
 
 from netaddr.ip.glob import (
     IPGlob,
