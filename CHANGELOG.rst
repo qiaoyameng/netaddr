@@ -6,6 +6,15 @@ NEXT_NETADDR_VERSION
 
 Date: not released yet
 
+Added:
+
+* Add scoped (zoned) IPv6 support: :class:`ScopedIPv6Address`,
+  :class:`ScopedIPv6Network` and :class:`ScopedIPv6Set` plus the explicit
+  :data:`ANY_ZONE` wildcard zone object. Zones are caller-provided
+  identifiers compared as strings (no system interface lookup) and are
+  only allowed on link-local and multicast addresses. Scoped sets support
+  intersection, union and difference across network ranges and zones.
+
 --------------
 Release: 1.3.0
 --------------

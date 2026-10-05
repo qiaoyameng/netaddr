@@ -195,6 +195,38 @@ The `IPSet` class was built specifically for this purpose.
 .. autoclass:: netaddr.IPSet
     :members:
 
+--------------------------
+Scoped (zoned) IPv6 types
+--------------------------
+
+Collectors reading several network interfaces at once need to tell identical
+link-local addresses on different interfaces apart: ``fe80::1%eth0`` and
+``fe80::1%eth1`` are distinct addresses.  The scoped IPv6 types model this
+without changing the zone-less equality rules of :class:`IPAddress`.
+
+Zones are caller-provided stable identifiers compared as exact strings; no
+system interface lookup is ever performed while parsing or comparing.  A
+zone is only allowed on link-local (``fe80::/10``) and multicast
+(``ff00::/8``) addresses and ranges.  A missing zone means "no zone" and
+never matches all interfaces implicitly; wildcard matching requires the
+explicit ``ANY_ZONE`` object (spelled ``%*`` in text form).
+
+.. data:: netaddr.ANY_ZONE
+
+   The explicit wildcard zone object.
+
+.. autoclass:: netaddr.ScopedIPv6Address
+    :members:
+
+.. autoclass:: netaddr.ScopedIPv6Network
+    :members:
+
+.. autoclass:: netaddr.ZoneFilter
+    :members:
+
+.. autoclass:: netaddr.ScopedIPv6Set
+    :members:
+
 ---------------------------
 IP functions and generators
 ---------------------------
